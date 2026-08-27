@@ -1,6 +1,86 @@
 package com.connectjob.controller;
-import com.connectjob.model.User; import com.connectjob.repository.UserRepository; import com.connectjob.security.JwtService; import jakarta.validation.constraints.*; import org.springframework.security.crypto.password.PasswordEncoder; import org.springframework.web.bind.annotation.*; import java.util.*;
-@RestController @RequestMapping("/api/auth") public class AuthController { record Req(@NotBlank String name,@Email String email,@Size(min=6) String password,String role){} record Login(String email,String password){} record Res(String token,String name,String role){}
-private final UserRepository repo; private final PasswordEncoder enc; private final JwtService jwt; public AuthController(UserRepository r,PasswordEncoder e,JwtService j){repo=r;enc=e;jwt=j;}
-@PostMapping("/register") public Res register(@RequestBody Req r){if(repo.existsByEmail(r.email()))throw new RuntimeException("Email already registered"); User u=new User(null,r.email(),enc.encode(r.password()),r.name(),"EMPLOYER".equalsIgnoreCase(r.role())?User.Role.EMPLOYER:User.Role.JOB_SEEKER);repo.save(u);return new Res(jwt.generate(u.getEmail()),u.getName(),u.getRole().name());}
-@PostMapping("/login") public Res login(@RequestBody Login r){User u=repo.findByEmail(r.email()).orElseThrow(()->new RuntimeException("Invalid credentials"));if(!enc.matches(r.password(),u.getPassword()))throw new RuntimeException("Invalid credentials");return new Res(jwt.generate(u.getEmail()),u.getName(),u.getRole().name());}}
+
+import com.connectjob.model.User;
+import com.connectjob.repository.UserRepository;
+import com.connectjob.security.JwtService;
+import org.springframework.http.ResponseEntity;
+import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.web.bind.annotation.*;
+
+import java.util.Map;
+
+@RestController
+@RequestMapping("/api/auth")
+@CrossOrigin(origins = "http://localhost:5173")
+public class AuthController {
+
+    private final UserRepository userRepository;
+    private final PasswordEncoder passwordEncoder;
+    private final JwtService jwtService;
+
+    public AuthController(UserRepository userRepository, PasswordEncoder passwordEncoder, JwtService jwtService) {
+        this.userRepository = userRepository;
+        this.passwordEncoder = passwordEncoder;
+        this.jwtService = jwtService;
+    }
+
+    // Request classes
+    public static class RegisterRequest {
+        public String name;
+        public String email;
+        public String password;
+        public String role;
+    }
+
+    public static class LoginRequest {
+        public String email;
+        public String password;
+    }
+
+    @PostMapping("/register")
+    public ResponseEntity<?> register(@RequestBody RegisterRequest req) {
+        if (userRepository.existsByEmail(req.email)) {
+            return ResponseEntity.badRequest().body(Map.of("error", "Email already registered"));
+        }
+
+        User user = new User();
+        user.setName(req.name);
+        user.setEmail(req.email);
+        user.setPassword(passwordEncoder.encode(req.password));
+        
+        if ("EMPLOYER".equalsIgnoreCase(req.role)) {
+            user.setRole(User.Role.EMPLOYER);
+        } else {
+            user.setRole(User.Role.JOB_SEEKER);
+        }
+
+        userRepository.save(user);
+        String token = jwtService.generate(user.getEmail());
+
+        return ResponseEntity.ok(Map.of(
+                "token", token,
+                "name", user.getName(),
+                "role", user.getRole().name(),
+                "email", user.getEmail()
+        ));
+    }
+
+    @PostMapping("/login")
+    public ResponseEntity<?> login(@RequestBody LoginRequest req) {
+        User user = userRepository.findByEmail(req.email)
+                .orElseThrow(() -> new RuntimeException("Invalid credentials"));
+
+        if (!passwordEncoder.matches(req.password, user.getPassword())) {
+            return ResponseEntity.badRequest().body(Map.of("error", "Invalid credentials"));
+        }
+
+        String token = jwtService.generate(user.getEmail());
+
+        return ResponseEntity.ok(Map.of(
+                "token", token,
+                "name", user.getName(),
+                "role", user.getRole().name(),
+                "email", user.getEmail()
+        ));
+    }
+}
